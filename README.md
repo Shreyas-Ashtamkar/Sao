@@ -1,7 +1,8 @@
-# Sao
-![Sao Logo](./assets/logo.png)
-
-**A lightweight, minimalist AI chat agent for solo developers.**
+<div align="center">
+  <img src="assets/logo.png" alt="Sao Logo" width="200" height="200" />
+  <h1>Sao</h1>
+  <p><b>A lightweight, minimalist AI chat agent for solo developers.</b></p>
+</div>
 
 ---
 
