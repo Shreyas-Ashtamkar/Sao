@@ -20,6 +20,17 @@ table ChatResponse {
   tool_calls_json: string;
 }
 
+table ListModelsRequest {
+  provider: string;
+}
+
+table ListModelsResponse {
+  provider: string;
+  models: [string];
+  error: string;
+}
+
 rpc_service SaoService {
   ChatStream(ChatRequest): ChatResponse (streaming: "server");
+  ListModels(ListModelsRequest): ListModelsResponse;
 }

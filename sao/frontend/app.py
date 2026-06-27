@@ -3,8 +3,6 @@ import uuid
 import threading
 import json
 import time
-import urllib.request
-from urllib.error import HTTPError
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QWidget, 
     QTextEdit, QLineEdit, QPushButton, QComboBox, QHBoxLayout,
@@ -13,12 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import pyqtSignal, QObject, pyqtSlot, QSettings, QThread
 from .client import SaoClient
 
-PROVIDERS = {
-    "OpenAI": ["gpt-4o", "gpt-4-turbo", "gpt-3.5-turbo"],
-    "Anthropic": ["claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-haiku-20240307"],
-    "GitHub": ["gpt-4o", "gpt-4o-mini", "o1-preview", "o1-mini", "Meta-Llama-3.1-70B-Instruct", "Meta-Llama-3.1-8B-Instruct", "Mistral-large-2407", "Cohere-command-r-plus-08-2024"],
-    "Google": ["gemini-1.5-pro", "gemini-1.5-flash"]
-}
+PROVIDERS = ["OpenAI", "Anthropic", "GitHub", "Google"]
 
 class WorkerSignals(QObject):
     chunk_received = pyqtSignal(str)
@@ -28,44 +21,14 @@ class ModelFetcherThread(QThread):
     models_fetched = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, provider, api_key):
+    def __init__(self, provider):
         super().__init__()
         self.provider = provider
-        self.api_key = api_key
 
     def run(self):
-        if not self.api_key:
-            self.error.emit(f"No API key set for {self.provider}")
-            return
-            
         try:
-            models = []
-            if self.provider == "OpenAI":
-                req = urllib.request.Request("https://api.openai.com/v1/models", headers={"Authorization": f"Bearer {self.api_key}"})
-                resp = urllib.request.urlopen(req)
-                data = json.loads(resp.read().decode())
-                models = [m["id"] for m in data.get("data", [])]
-            elif self.provider == "Anthropic":
-                req = urllib.request.Request("https://api.anthropic.com/v1/models", headers={"x-api-key": self.api_key, "anthropic-version": "2023-06-01"})
-                resp = urllib.request.urlopen(req)
-                data = json.loads(resp.read().decode())
-                models = [m["id"] for m in data.get("data", [])]
-            elif self.provider == "GitHub":
-                req = urllib.request.Request("https://api.github.com/models", headers={"Authorization": f"Bearer {self.api_key}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
-                resp = urllib.request.urlopen(req)
-                data = json.loads(resp.read().decode())
-                models = [m["name"] for m in data if "name" in m]
-                if not models:
-                    models = [m.get("id", m.get("name")) for m in data]
-            elif self.provider == "Google":
-                req = urllib.request.Request(f"https://generativelanguage.googleapis.com/v1beta/models?key={self.api_key}")
-                resp = urllib.request.urlopen(req)
-                data = json.loads(resp.read().decode())
-                models = [m["name"].replace("models/", "") for m in data.get("models", [])]
-                
+            models = SaoClient().list_models(self.provider)
             self.models_fetched.emit(models)
-        except HTTPError as e:
-            self.error.emit(f"HTTP Error: {e.code} {e.reason}")
         except Exception as e:
             self.error.emit(f"Error: {str(e)}")
 
@@ -82,7 +45,7 @@ class SettingsDialog(QDialog):
         form_layout = QFormLayout()
         
         self.provider_combo = QComboBox()
-        self.provider_combo.addItems(list(PROVIDERS.keys()))
+        self.provider_combo.addItems(PROVIDERS)
         
         current_provider = self.settings.value("provider", "OpenAI")
         if current_provider in PROVIDERS:
@@ -92,7 +55,7 @@ class SettingsDialog(QDialog):
         
         # API Keys
         self.key_inputs = {}
-        for prov in PROVIDERS.keys():
+        for prov in PROVIDERS:
             inp = QLineEdit()
             inp.setEchoMode(QLineEdit.EchoMode.Password)
             inp.setText(self.settings.value(f"{prov}_api_key", ""))
@@ -130,6 +93,8 @@ class SaoApp(QMainWindow):
         self.fetcher_thread = None
         
         self.init_ui()
+        if self.model_selector.count() == 0:
+            self.refresh_models()
         
     def init_ui(self):
         central_widget = QWidget()
@@ -172,16 +137,11 @@ class SaoApp(QMainWindow):
         
     def refresh_models(self):
         provider = self.settings.value("provider", "OpenAI")
-        api_key = self.settings.value(f"{provider}_api_key", "")
-        
-        if not api_key:
-            QMessageBox.warning(self, "No API Key", f"Please set your {provider} API Key in Settings first.")
-            return
-            
+
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("Fetching...")
         
-        self.fetcher_thread = ModelFetcherThread(provider, api_key)
+        self.fetcher_thread = ModelFetcherThread(provider)
         self.fetcher_thread.models_fetched.connect(self.on_models_fetched)
         self.fetcher_thread.error.connect(self.on_fetch_error)
         self.fetcher_thread.finished.connect(self.on_fetch_finished)
@@ -214,9 +174,6 @@ class SaoApp(QMainWindow):
         except:
             models = []
             
-        if not models:
-            models = PROVIDERS.get(provider, [])
-        
         usage_json = self.settings.value("model_usage", "{}")
         try:
             usage = json.loads(usage_json)
@@ -237,6 +194,8 @@ class SaoApp(QMainWindow):
         dialog = SettingsDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.update_model_list()
+            if self.model_selector.count() == 0:
+                self.refresh_models()
 
     def send_message(self):
         text = self.input_field.text().strip()
@@ -264,8 +223,10 @@ class SaoApp(QMainWindow):
         self.settings.setValue("model_usage", json.dumps(usage))
         
         # Format model for backend
-        if provider == "GitHub":
-            backend_model = f"github/{model_id}"
+        if "/" in model_id:
+            backend_model = model_id
+        elif provider == "GitHub":
+            backend_model = f"github_copilot/{model_id}"
         elif provider == "Anthropic":
             backend_model = f"anthropic/{model_id}"
         elif provider == "Google":
