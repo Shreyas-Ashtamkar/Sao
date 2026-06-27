@@ -6,7 +6,7 @@ import flatbuffers
 import asyncio
 
 from sao.ipc.sao_grpc_fb import SaoServiceServicer, add_SaoServiceServicer_to_server
-from sao.ipc import ChatRequest, ChatResponse
+from sao.ipc import ChatRequest, ChatResponse, ListModelsRequest, ListModelsResponse
 from .router import Router
 from .database import Database
 from .mcp_manager import MCPManager
@@ -99,6 +99,53 @@ class SaoServicer(SaoServiceServicer):
             pass
         finally:
             loop.run_until_complete(async_gen.aclose())
+            loop.close()
+
+    async def _async_list_models(self, request):
+        req = ListModelsRequest.ListModelsRequest.GetRootAs(request, 0)
+        provider = req.Provider().decode('utf-8') if req.Provider() else ""
+
+        error = ""
+        try:
+            models = self.router.list_available_models(provider)
+            await self.db.save_provider_models(provider, models)
+        except Exception as exc:
+            try:
+                models = await self.db.get_provider_models(provider)
+            except Exception as cache_exc:
+                models = []
+                error = f"{exc}; cache lookup failed: {cache_exc}"
+            else:
+                if not models:
+                    error = str(exc)
+
+        builder = flatbuffers.Builder(1024)
+        provider_off = builder.CreateString(provider)
+        error_off = builder.CreateString(error)
+
+        model_offsets = [builder.CreateString(model) for model in models]
+        models_vec = 0
+        if model_offsets:
+            ListModelsResponse.ListModelsResponseStartModelsVector(builder, len(model_offsets))
+            for model_offset in reversed(model_offsets):
+                builder.PrependUOffsetTRelative(model_offset)
+            models_vec = builder.EndVector()
+
+        ListModelsResponse.ListModelsResponseStart(builder)
+        ListModelsResponse.ListModelsResponseAddProvider(builder, provider_off)
+        if models_vec:
+            ListModelsResponse.ListModelsResponseAddModels(builder, models_vec)
+        ListModelsResponse.ListModelsResponseAddError(builder, error_off)
+        res = ListModelsResponse.ListModelsResponseEnd(builder)
+        builder.Finish(res)
+        return bytes(builder.Output())
+
+    def ListModels(self, request, context):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(self._async_list_models(request))
+        finally:
             loop.close()
 
 

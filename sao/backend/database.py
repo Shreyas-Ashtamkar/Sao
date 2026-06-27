@@ -35,6 +35,13 @@ class Database:
                     FOREIGN KEY(message_id) REFERENCES messages(message_id)
                 )
             """)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS provider_models (
+                    provider TEXT PRIMARY KEY,
+                    models_json TEXT NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+            """)
             await db.commit()
 
     async def create_session(self, title="New Session"):
@@ -72,3 +79,31 @@ class Database:
                 rows = await cursor.fetchall()
                 # Return in chronological order
                 return [{"role": row[0], "content": row[1]} for row in reversed(rows)]
+
+    async def save_provider_models(self, provider, models):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO provider_models (provider, models_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(provider) DO UPDATE SET
+                    models_json = excluded.models_json,
+                    updated_at = excluded.updated_at
+                """,
+                (provider, json.dumps(models), datetime.now())
+            )
+            await db.commit()
+
+    async def get_provider_models(self, provider):
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute(
+                "SELECT models_json FROM provider_models WHERE provider = ?",
+                (provider,)
+            ) as cursor:
+                row = await cursor.fetchone()
+                if not row:
+                    return []
+                try:
+                    return json.loads(row[0])
+                except json.JSONDecodeError:
+                    return []

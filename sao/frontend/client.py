@@ -5,7 +5,7 @@ import flatbuffers
 import uuid
 
 from sao.ipc.sao_grpc_fb import SaoServiceStub
-from sao.ipc import ChatRequest, ChatMessage, Role
+from sao.ipc import ChatRequest, ChatMessage, ChatResponse, ListModelsRequest, ListModelsResponse, Role
 
 class SaoClient:
     def __init__(self, host='localhost', port=50051):
@@ -49,9 +49,26 @@ class SaoClient:
         # Call streaming gRPC
         response_iterator = self.stub.ChatStream(req_bytes)
         
-        from sao.ipc.ChatResponse import ChatResponse
         for res_bytes in response_iterator:
-            res = ChatResponse.GetRootAs(res_bytes, 0)
+            res = ChatResponse.ChatResponse.GetRootAs(res_bytes, 0)
             chunk = res.Chunk().decode('utf-8') if res.Chunk() else ""
             is_final = res.IsFinal()
             yield chunk, is_final
+
+    def list_models(self, provider):
+        builder = flatbuffers.Builder(256)
+        provider_off = builder.CreateString(provider)
+
+        ListModelsRequest.Start(builder)
+        ListModelsRequest.AddProvider(builder, provider_off)
+        req = ListModelsRequest.End(builder)
+        builder.Finish(req)
+
+        response_bytes = self.stub.ListModels(bytes(builder.Output()))
+        response = ListModelsResponse.ListModelsResponse.GetRootAs(response_bytes, 0)
+        models = [response.Models(i).decode('utf-8') for i in range(response.ModelsLength())]
+        error = response.Error().decode('utf-8') if response.Error() else ""
+        if error and not models:
+            raise RuntimeError(error)
+
+        return models
