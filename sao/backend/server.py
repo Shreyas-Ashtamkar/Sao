@@ -110,8 +110,14 @@ class SaoServicer(SaoServiceServicer):
             models = self.router.list_available_models(provider)
             await self.db.save_provider_models(provider, models)
         except Exception as exc:
-            models = await self.db.get_provider_models(provider)
-            error = str(exc)
+            try:
+                models = await self.db.get_provider_models(provider)
+            except Exception as cache_exc:
+                models = []
+                error = f"{exc}; cache lookup failed: {cache_exc}"
+            else:
+                if not models:
+                    error = str(exc)
 
         builder = flatbuffers.Builder(1024)
         provider_off = builder.CreateString(provider)

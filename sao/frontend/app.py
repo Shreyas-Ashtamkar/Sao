@@ -37,7 +37,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Settings")
-        self.resize(350, 250)
+        self.resize(360, 140)
         
         self.settings = QSettings("Sao", "SaoApp")
         
@@ -52,17 +52,9 @@ class SettingsDialog(QDialog):
             self.provider_combo.setCurrentText(current_provider)
             
         form_layout.addRow(QLabel("Provider:"), self.provider_combo)
-        
-        # API Keys
-        self.key_inputs = {}
-        for prov in PROVIDERS:
-            inp = QLineEdit()
-            inp.setEchoMode(QLineEdit.EchoMode.Password)
-            inp.setText(self.settings.value(f"{prov}_api_key", ""))
-            self.key_inputs[prov] = inp
-            form_layout.addRow(QLabel(f"{prov} API Key:"), inp)
             
         layout.addLayout(form_layout)
+        layout.addWidget(QLabel("Credentials are managed by your backend environment."))
         
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
@@ -71,8 +63,6 @@ class SettingsDialog(QDialog):
         
     def accept(self):
         self.settings.setValue("provider", self.provider_combo.currentText())
-        for prov, inp in self.key_inputs.items():
-            self.settings.setValue(f"{prov}_api_key", inp.text().strip())
         super().accept()
 
 class SaoApp(QMainWindow):
@@ -89,6 +79,7 @@ class SaoApp(QMainWindow):
         self.signals = WorkerSignals()
         self.signals.chunk_received.connect(self.append_chunk)
         self.signals.finished.connect(self.on_generation_finished)
+        self.is_generating = False
         
         self.fetcher_thread = None
         
@@ -150,10 +141,12 @@ class SaoApp(QMainWindow):
     @pyqtSlot(list)
     def on_models_fetched(self, models):
         provider = self.settings.value("provider", "OpenAI")
+        self.settings.setValue(f"{provider}_dynamic_models", json.dumps(models))
+        self.update_model_list()
         if models:
-            self.settings.setValue(f"{provider}_dynamic_models", json.dumps(models))
-            self.update_model_list()
             QMessageBox.information(self, "Success", f"Fetched {len(models)} models for {provider}.")
+        else:
+            QMessageBox.warning(self, "No Models", f"No models are currently available for {provider}.")
             
     @pyqtSlot(str)
     def on_fetch_error(self, err):
@@ -189,6 +182,19 @@ class SaoApp(QMainWindow):
         # Restore previously selected model if it's still in the list
         if current_model in models_sorted:
             self.model_selector.setCurrentText(current_model)
+        self.update_interaction_state()
+
+    def update_interaction_state(self):
+        has_model = self.model_selector.count() > 0 and bool(self.model_selector.currentText())
+        can_send = has_model and not self.is_generating
+
+        self.input_field.setEnabled(can_send)
+        self.send_button.setEnabled(can_send)
+
+        if has_model:
+            self.input_field.setPlaceholderText("")
+        else:
+            self.input_field.setPlaceholderText("No model available. Refresh models or change provider in Settings.")
             
     def open_settings(self):
         dialog = SettingsDialog(self)
@@ -198,19 +204,23 @@ class SaoApp(QMainWindow):
                 self.refresh_models()
 
     def send_message(self):
+        model_id = self.model_selector.currentText().strip()
+        if not model_id:
+            QMessageBox.warning(self, "No Model Selected", "Load models before sending a message.")
+            return
+
         text = self.input_field.text().strip()
         if not text:
             return
             
         self.input_field.clear()
-        self.input_field.setEnabled(False)
-        self.send_button.setEnabled(False)
+        self.is_generating = True
+        self.update_interaction_state()
         
         self.chat_display.append(f"<b>You:</b> {text}<br>")
         self.chat_display.append("<b>Sao:</b> ")
         
         self.messages_history.append({"role": "user", "content": text})
-        model_id = self.model_selector.currentText()
         provider = self.settings.value("provider", "OpenAI")
         
         # Track usage recency
@@ -262,9 +272,9 @@ class SaoApp(QMainWindow):
         
     @pyqtSlot()
     def on_generation_finished(self):
+        self.is_generating = False
         self.chat_display.append("<br>")
-        self.input_field.setEnabled(True)
-        self.send_button.setEnabled(True)
+        self.update_interaction_state()
         self.input_field.setFocus()
         self.update_model_list() # Re-sort models after message finishes if usage changed
 

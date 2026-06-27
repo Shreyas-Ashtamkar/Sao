@@ -66,8 +66,9 @@ class SaoClient:
 
         response_bytes = self.stub.ListModels(bytes(builder.Output()))
         response = ListModelsResponse.ListModelsResponse.GetRootAs(response_bytes, 0)
+        models = [response.Models(i).decode('utf-8') for i in range(response.ModelsLength())]
         error = response.Error().decode('utf-8') if response.Error() else ""
-        if error:
+        if error and not models:
             raise RuntimeError(error)
 
-        return [response.Models(i).decode('utf-8') for i in range(response.ModelsLength())]
+        return models
