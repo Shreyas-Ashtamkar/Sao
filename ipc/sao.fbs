@@ -1,0 +1,25 @@
+namespace sao.ipc;
+
+enum Role : byte { User = 0, Assistant = 1, System = 2, Tool = 3 }
+
+table ChatMessage {
+  role: Role;
+  content: string;
+}
+
+table ChatRequest {
+  session_id: string;
+  model_id: string;
+  messages: [ChatMessage];
+}
+
+table ChatResponse {
+  session_id: string;
+  chunk: string;
+  is_final: bool;
+  tool_calls_json: string;
+}
+
+rpc_service SaoService {
+  ChatStream(ChatRequest): ChatResponse (streaming: "server");
+}

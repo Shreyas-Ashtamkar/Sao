@@ -1,0 +1,6 @@
+PyQt6==6.11.0
+grpcio==1.81.1
+flatbuffers==25.12.19
+litellm==1.83.7
+mcp==1.28.1
+aiosqlite==0.22.1
