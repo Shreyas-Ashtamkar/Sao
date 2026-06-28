@@ -63,8 +63,15 @@ class ChatRequest(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
         return o == 0
 
+    # ChatRequest
+    def Provider(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(10))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
 def ChatRequestStart(builder):
-    builder.StartObject(3)
+    builder.StartObject(4)
 
 def Start(builder):
     ChatRequestStart(builder)
@@ -98,6 +105,12 @@ def ChatRequestCreateMessagesVector(builder, data):
 
 def CreateMessagesVector(builder, data):
     ChatRequestCreateMessagesVector(builder, data)
+
+def ChatRequestAddProvider(builder, provider):
+    builder.PrependUOffsetTRelativeSlot(3, flatbuffers.number_types.UOffsetTFlags.py_type(provider), 0)
+
+def AddProvider(builder, provider):
+    ChatRequestAddProvider(builder, provider)
 
 def ChatRequestEnd(builder):
     return builder.EndObject()

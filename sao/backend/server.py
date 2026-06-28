@@ -26,6 +26,7 @@ class SaoServicer(SaoServiceServicer):
         req = ChatRequest.ChatRequest.GetRootAs(request_bytes, 0)
         session_id = req.SessionId().decode('utf-8')
         model_id = req.ModelId().decode('utf-8')
+        provider = req.Provider().decode('utf-8') if req.Provider() else ""
         
         messages = []
         for i in range(req.MessagesLength()):
@@ -39,7 +40,7 @@ class SaoServicer(SaoServiceServicer):
 
         # Call the router
         full_response = ""
-        async for chunk in self.router.generate_response_stream(model_id, messages, self.mcp.get_tool_schemas()):
+        async for chunk in self.router.generate_response_stream(model_id, messages, self.mcp.get_tool_schemas(), provider=provider):
             # Handle LiteLLM chunk
             if isinstance(chunk, dict) and "error" in chunk:
                 content = f"Error: {chunk['error']}"

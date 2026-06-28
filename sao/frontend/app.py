@@ -21,9 +21,10 @@ class ModelFetcherThread(QThread):
     models_fetched = pyqtSignal(list)
     error = pyqtSignal(str)
 
-    def __init__(self, provider):
+    def __init__(self, provider, is_startup=False):
         super().__init__()
         self.provider = provider
+        self.is_startup = is_startup
 
     def run(self):
         try:
@@ -84,8 +85,7 @@ class SaoApp(QMainWindow):
         self.fetcher_thread = None
         
         self.init_ui()
-        if self.model_selector.count() == 0:
-            self.refresh_models()
+        self.refresh_models(is_startup=True)
         
     def init_ui(self):
         central_widget = QWidget()
@@ -96,14 +96,10 @@ class SaoApp(QMainWindow):
         header_layout = QHBoxLayout()
         self.model_selector = QComboBox()
         
-        self.refresh_btn = QPushButton("Refresh Models")
-        self.refresh_btn.clicked.connect(self.refresh_models)
-        
         self.settings_btn = QPushButton("Settings")
         self.settings_btn.clicked.connect(self.open_settings)
         
         header_layout.addWidget(self.model_selector)
-        header_layout.addWidget(self.refresh_btn)
         header_layout.addStretch()
         header_layout.addWidget(self.settings_btn)
         
@@ -126,16 +122,12 @@ class SaoApp(QMainWindow):
         
         self.update_model_list()
         
-    def refresh_models(self):
+    def refresh_models(self, is_startup=False):
         provider = self.settings.value("provider", "OpenAI")
 
-        self.refresh_btn.setEnabled(False)
-        self.refresh_btn.setText("Fetching...")
-        
-        self.fetcher_thread = ModelFetcherThread(provider)
+        self.fetcher_thread = ModelFetcherThread(provider, is_startup=is_startup)
         self.fetcher_thread.models_fetched.connect(self.on_models_fetched)
         self.fetcher_thread.error.connect(self.on_fetch_error)
-        self.fetcher_thread.finished.connect(self.on_fetch_finished)
         self.fetcher_thread.start()
 
     @pyqtSlot(list)
@@ -143,19 +135,25 @@ class SaoApp(QMainWindow):
         provider = self.settings.value("provider", "OpenAI")
         self.settings.setValue(f"{provider}_dynamic_models", json.dumps(models))
         self.update_model_list()
-        if models:
-            QMessageBox.information(self, "Success", f"Fetched {len(models)} models for {provider}.")
-        else:
+        if not models:
             QMessageBox.warning(self, "No Models", f"No models are currently available for {provider}.")
             
     @pyqtSlot(str)
     def on_fetch_error(self, err):
-        QMessageBox.warning(self, "Fetch Error", f"Failed to fetch models: {err}")
-        
-    @pyqtSlot()
-    def on_fetch_finished(self):
-        self.refresh_btn.setEnabled(True)
-        self.refresh_btn.setText("Refresh Models")
+        if self.fetcher_thread and self.fetcher_thread.is_startup:
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("Startup Error")
+            msg.setText(f"Could not load models: {err}\n\nCheck your API key and network connection.")
+            open_settings_btn = msg.addButton("Open Settings", QMessageBox.ButtonRole.ActionRole)
+            msg.addButton("Quit", QMessageBox.ButtonRole.RejectRole)
+            msg.exec()
+            if msg.clickedButton() == open_settings_btn:
+                self.open_settings()
+            else:
+                QApplication.instance().quit()
+        else:
+            QMessageBox.warning(self, "Fetch Error", f"Failed to fetch models: {err}")
         
     def update_model_list(self):
         provider = self.settings.value("provider", "OpenAI")
@@ -200,8 +198,7 @@ class SaoApp(QMainWindow):
         dialog = SettingsDialog(self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.update_model_list()
-            if self.model_selector.count() == 0:
-                self.refresh_models()
+            self.refresh_models()
 
     def send_message(self):
         model_id = self.model_selector.currentText().strip()
@@ -232,25 +229,13 @@ class SaoApp(QMainWindow):
         usage[model_id] = time.time()
         self.settings.setValue("model_usage", json.dumps(usage))
         
-        # Format model for backend
-        if "/" in model_id:
-            backend_model = model_id
-        elif provider == "GitHub":
-            backend_model = f"github_copilot/{model_id}"
-        elif provider == "Anthropic":
-            backend_model = f"anthropic/{model_id}"
-        elif provider == "Google":
-            backend_model = f"gemini/{model_id}"
-        else:
-            backend_model = model_id
-        
         # Start background thread for gRPC streaming
-        threading.Thread(target=self.stream_response, args=(backend_model,), daemon=True).start()
+        threading.Thread(target=self.stream_response, args=(model_id, provider), daemon=True).start()
         
-    def stream_response(self, model_id):
+    def stream_response(self, model_id, provider):
         full_response = ""
         try:
-            for chunk, is_final in self.client.send_chat_stream(self.session_id, model_id, self.messages_history):
+            for chunk, is_final in self.client.send_chat_stream(self.session_id, model_id, self.messages_history, provider=provider):
                 if chunk:
                     full_response += chunk
                     self.signals.chunk_received.emit(chunk)
