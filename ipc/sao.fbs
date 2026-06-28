@@ -11,6 +11,7 @@ table ChatRequest {
   session_id: string;
   model_id: string;
   messages: [ChatMessage];
+  provider: string;
 }
 
 table ChatResponse {

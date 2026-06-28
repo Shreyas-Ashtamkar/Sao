@@ -12,7 +12,7 @@ class SaoClient:
         self.channel = grpc.insecure_channel(f'{host}:{port}')
         self.stub = SaoServiceStub(self.channel)
 
-    def send_chat_stream(self, session_id, model_id, messages_history):
+    def send_chat_stream(self, session_id, model_id, messages_history, provider=""):
         builder = flatbuffers.Builder(1024)
         
         # Serialize messages
@@ -35,11 +35,13 @@ class SaoClient:
         
         session_id_off = builder.CreateString(session_id)
         model_id_off = builder.CreateString(model_id)
+        provider_off = builder.CreateString(provider)
         
         ChatRequest.Start(builder)
         ChatRequest.AddSessionId(builder, session_id_off)
         ChatRequest.AddModelId(builder, model_id_off)
         ChatRequest.AddMessages(builder, msgs_vec)
+        ChatRequest.AddProvider(builder, provider_off)
         
         req = ChatRequest.End(builder)
         builder.Finish(req)

@@ -171,13 +171,13 @@ class Router:
 
         return sorted(set(normalized))
 
-    async def generate_response_stream(self, model_id, messages, tools=None):
+    async def generate_response_stream(self, model_id, messages, tools=None, provider=None):
         try:
             # Prepend system prompt if not present
             if not messages or messages[0].get("role") != "system":
                 messages.insert(0, {"role": "system", "content": self.system_prompt})
 
-            litellm_model = self.normalize_model_id(model_id)
+            litellm_model = self.normalize_model_id(model_id, provider=provider)
 
             kwargs = {
                 "model": litellm_model,

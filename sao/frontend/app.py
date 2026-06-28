@@ -141,11 +141,17 @@ class SaoApp(QMainWindow):
     @pyqtSlot(str)
     def on_fetch_error(self, err):
         if self.fetcher_thread and self.fetcher_thread.is_startup:
-            QMessageBox.critical(
-                self, "Startup Error",
-                f"Could not load models: {err}\n\nCheck your API key and network connection."
-            )
-            QApplication.instance().quit()
+            msg = QMessageBox(self)
+            msg.setIcon(QMessageBox.Icon.Critical)
+            msg.setWindowTitle("Startup Error")
+            msg.setText(f"Could not load models: {err}\n\nCheck your API key and network connection.")
+            open_settings_btn = msg.addButton("Open Settings", QMessageBox.ButtonRole.ActionRole)
+            msg.addButton("Quit", QMessageBox.ButtonRole.RejectRole)
+            msg.exec()
+            if msg.clickedButton() == open_settings_btn:
+                self.open_settings()
+            else:
+                QApplication.instance().quit()
         else:
             QMessageBox.warning(self, "Fetch Error", f"Failed to fetch models: {err}")
         
@@ -223,25 +229,13 @@ class SaoApp(QMainWindow):
         usage[model_id] = time.time()
         self.settings.setValue("model_usage", json.dumps(usage))
         
-        # Format model for backend
-        if "/" in model_id:
-            backend_model = model_id
-        elif provider == "GitHub":
-            backend_model = f"github_copilot/{model_id}"
-        elif provider == "Anthropic":
-            backend_model = f"anthropic/{model_id}"
-        elif provider == "Google":
-            backend_model = f"gemini/{model_id}"
-        else:
-            backend_model = model_id
-        
         # Start background thread for gRPC streaming
-        threading.Thread(target=self.stream_response, args=(backend_model,), daemon=True).start()
+        threading.Thread(target=self.stream_response, args=(model_id, provider), daemon=True).start()
         
-    def stream_response(self, model_id):
+    def stream_response(self, model_id, provider):
         full_response = ""
         try:
-            for chunk, is_final in self.client.send_chat_stream(self.session_id, model_id, self.messages_history):
+            for chunk, is_final in self.client.send_chat_stream(self.session_id, model_id, self.messages_history, provider=provider):
                 if chunk:
                     full_response += chunk
                     self.signals.chunk_received.emit(chunk)
