@@ -66,7 +66,7 @@ class Router:
                 if any(excl in lower for excl in _OPENAI_EXCLUDE):
                     continue
                 result.append(m)
-            return sorted(set(result))
+            return sorted(set(result)) or self._static_fallback("OpenAI")
         except Exception:
             return self._static_fallback("OpenAI")
 
@@ -76,7 +76,8 @@ class Router:
                 check_provider_endpoint=True,
                 custom_llm_provider="anthropic",
             )
-            return sorted(set(m for m in models if isinstance(m, str)))
+            result = sorted(set(m for m in models if isinstance(m, str)))
+            return result or self._static_fallback("Anthropic")
         except Exception:
             return self._static_fallback("Anthropic")
 
@@ -94,7 +95,7 @@ class Router:
                 display = m[len("gemini/"):] if m.startswith("gemini/") else m
                 if display.startswith("gemini-"):
                     result.append(display)
-            return sorted(set(result))
+            return sorted(set(result)) or self._static_fallback("Google")
         except Exception:
             return self._static_fallback("Google")
 
