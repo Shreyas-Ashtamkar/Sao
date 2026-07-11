@@ -20,8 +20,12 @@
 
 ## Conventions And Pitfalls
 - Keep long-running work off the UI thread; use Qt signals, worker threads, or background tasks.
+- Worker threads emit data only; create dialogs, open Settings, and call application lifecycle APIs from GUI-thread slots.
 - Keep FlatBuffers schema changes and generated Python bindings in sync.
 - Regenerate IPC artifacts with [bin/flatc](bin/flatc) when the schema changes.
+- Verify the generated bindings imported at runtime; do not manually copy generated code between artifact locations.
+- Carry the selected provider through chat IPC so the backend performs model-ID normalization and validation with provider context.
+- Treat cached models as usable after a provider refresh failure; disable chat when no models are available, and keep credential settings aligned with their declared frontend or backend owner.
 - Preserve the hardcoded system prompt and single-session behavior described in the SRS.
 - Keep GitHub Copilot routing aligned with LiteLLM-based handling from the SRS.
 - Link to existing docs instead of duplicating them in instructions.
