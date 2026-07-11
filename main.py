@@ -24,7 +24,7 @@ if __name__ == "__main__":
     finally:
         if backend_process.is_alive():
             backend_shutdown.set()
-            backend_process.join(timeout=5)
+            backend_process.join(timeout=10)
         if backend_process.is_alive():
             backend_process.kill()
             backend_process.join(timeout=5)

@@ -4,7 +4,7 @@ import flatbuffers
 import asyncio
 import signal
 from contextlib import suppress
-
+from mcp import McpError
 from sao.ipc.sao_grpc_fb import SaoServiceServicer, add_SaoServiceServicer_to_server
 from sao.ipc import ChatRequest, ChatResponse, ListModelsRequest, ListModelsResponse
 from .router import Router
@@ -186,7 +186,7 @@ async def serve_async(shutdown_requested=None):
         shutdown_task.cancel()
         with suppress(asyncio.CancelledError):
             await shutdown_task
-    except (ValueError, OSError, asyncio.TimeoutError) as exc:
+    except (ValueError, OSError, asyncio.TimeoutError, McpError) as exc:
         shutdown_task.cancel()
         with suppress(asyncio.CancelledError):
             await shutdown_task
