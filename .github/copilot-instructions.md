@@ -32,7 +32,10 @@
 
 ## Repo-specific conventions
 - Keep the UI responsive: no blocking/network-heavy work on the UI thread; use signals, worker threads, or background tasks.
+- Worker threads emit data only. Create dialogs, open Settings, and call application lifecycle APIs from GUI-thread slots.
 - Keep model ID normalization in backend router logic, not duplicated in frontend logic.
+- For chat requests, carry the selected provider through IPC so the backend can normalize and validate the model ID with provider context.
+- Treat cached models as usable after a provider refresh failure; when no models are available, disable chat rather than sending an empty model ID. Declare whether credentials are frontend- or backend-owned, and keep settings aligned with that owner.
 - Preserve single-session behavior and the hardcoded system prompt semantics from the SRS.
 - Keep persistence local to SQLite; do not add telemetry/cloud-sync behavior.
 - Scope tool execution through MCP only; do not introduce arbitrary shell execution in backend paths.
@@ -53,6 +56,7 @@
 ## IPC and streaming checklist
 - When changing `ipc/sao.fbs`, regenerate Python FlatBuffers/gRPC bindings with `bin/flatc`.
 - Keep schema, generated code, frontend client parsing, and backend servicer handlers in sync.
+- Verify the generated bindings imported at runtime; do not manually copy generated code between artifact locations.
 - For chat/list-model changes, verify the end-to-end path:
   - `sao/frontend/client.py` -> `sao/ipc/*` -> `sao/backend/server.py` -> `sao/backend/router.py`/`sao/backend/database.py`.
 
