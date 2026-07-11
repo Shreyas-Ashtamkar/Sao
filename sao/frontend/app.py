@@ -83,7 +83,7 @@ class SaoApp(QMainWindow):
         self.signals.finished.connect(self.on_generation_finished)
         self.is_generating = False
         
-        self.fetcher_thread = None
+        self.fetcher_threads = set()
         self.model_fetch_request_id = 0
         
         self.init_ui()
@@ -128,14 +128,23 @@ class SaoApp(QMainWindow):
         provider = self.settings.value("provider", "OpenAI")
         self.model_fetch_request_id += 1
 
-        self.fetcher_thread = ModelFetcherThread(
+        fetcher_thread = ModelFetcherThread(
             provider,
             self.model_fetch_request_id,
             is_startup=is_startup,
         )
-        self.fetcher_thread.models_fetched.connect(self.on_models_fetched)
-        self.fetcher_thread.error.connect(self.on_fetch_error)
-        self.fetcher_thread.start()
+        self.fetcher_threads.add(fetcher_thread)
+        fetcher_thread.models_fetched.connect(self.on_models_fetched)
+        fetcher_thread.error.connect(self.on_fetch_error)
+        fetcher_thread.finished.connect(self.on_fetcher_finished)
+        fetcher_thread.start()
+
+    @pyqtSlot()
+    def on_fetcher_finished(self):
+        fetcher_thread = self.sender()
+        if fetcher_thread in self.fetcher_threads:
+            self.fetcher_threads.remove(fetcher_thread)
+            fetcher_thread.deleteLater()
 
     @pyqtSlot(str, list, int)
     def on_models_fetched(self, provider, models, request_id):
