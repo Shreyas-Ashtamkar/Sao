@@ -66,3 +66,8 @@
 - Keep MCP server configuration local and explicit (no cloud sync, no hidden fallback server list).
 - Load MCP tool schemas before chat requests need them, and pass only those schemas through router calls.
 - Keep execution strictly inside MCP (`execute_tool` path); do not add direct shell-command execution paths in backend logic.
+
+# Permission and Authorization Handling
+- **Report Permission Denials**: If a command, tool, or service fails with a "Permission denied" or authorization error (e.g., missing GitHub CLI permissions), do not silently fall back to a workaround.
+- **Prompt the User for Fixes**: Pause execution, report the exact error message and the required permissions to the user. Allow the user to fix the configuration or authorize the action.
+- **Use Workarounds Only as a Last Resort**: Only employ alternative methods or workarounds if the user explicitly declines to fix the permissions or instructs you to find another way.
