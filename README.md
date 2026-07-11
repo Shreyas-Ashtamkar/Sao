@@ -15,9 +15,31 @@ Built with speed and minimalism in mind, Sao offers you a powerful assistant exp
 - **Modern UI**: Built on **PyQt6** for a native, fast, and responsive desktop experience.
 - **High-Performance Architecture**: Decoupled GUI and Python backend, communicating locally via **gRPC** and **FlatBuffers** to ensure the interface never freezes, even under heavy generation loads.
 - **LLM Hot-Switching**: Instantly switch between OpenAI, Anthropic, Ollama, and GitHub Copilot natively using **LiteLLM**.
-- **Model Context Protocol (MCP)**: Bundled with the **WebFetch MCP**, enabling your LLM to seamlessly browse and fetch web contents.
+- **Model Context Protocol (MCP)**: Connects explicitly configured local MCP servers, enabling the LLM to use their exposed tools.
 - **Local Privacy**: All conversation histories and metadata are saved to a local **SQLite** database. No telemetry, no cloud syncing.
 - **Single-Session Focus**: Hardcoded system prompt keeping the assistant strictly focused on your immediate tasks without context bleed from older sessions.
 
 ## Getting Started
-*(Setup instructions and documentation will be added here as the project matures.)*
+
+Install dependencies with `python -m pip install -r requirements.txt`, then run `python main.py`.
+
+### MCP configuration
+
+Configure local stdio MCP servers in `~/.sao/mcp_servers.json` before starting Sao. Server
+commands, arguments, environment variables, and working directories remain local; Sao does not
+provide hidden or cloud-synced server defaults.
+
+```json
+{
+  "servers": {
+    "webfetch": {
+      "command": "npx",
+      "args": ["-y", "@example/webfetch-mcp"],
+      "cwd": "/path/to/working-directory"
+    }
+  }
+}
+```
+
+Tools are presented to models as `<server>__<tool>`, and execution is limited to the configured
+server that exposes each tool.

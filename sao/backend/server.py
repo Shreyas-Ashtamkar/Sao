@@ -1,9 +1,9 @@
 import grpc
-import sys
-import os
 from concurrent import futures
 import flatbuffers
 import asyncio
+import signal
+from contextlib import suppress
 
 from sao.ipc.sao_grpc_fb import SaoServiceServicer, add_SaoServiceServicer_to_server
 from sao.ipc import ChatRequest, ChatResponse, ListModelsRequest, ListModelsResponse
@@ -40,7 +40,13 @@ class SaoServicer(SaoServiceServicer):
 
         # Call the router
         full_response = ""
-        async for chunk in self.router.generate_response_stream(model_id, messages, self.mcp.get_tool_schemas(), provider=provider):
+        async for chunk in self.router.generate_response_stream(
+            model_id,
+            messages,
+            self.mcp.get_tool_schemas(),
+            provider=provider,
+            tool_executor=self.mcp.execute_tool,
+        ):
             # Handle LiteLLM chunk
             if isinstance(chunk, dict) and "error" in chunk:
                 content = f"Error: {chunk['error']}"
@@ -80,27 +86,9 @@ class SaoServicer(SaoServiceServicer):
         builder.Finish(res)
         yield bytes(builder.Output())
 
-    def ChatStream(self, request, context):
-        # We must bridge sync generator to async logic
-        # In grpcio 1.64+, you can run an async servicer, but standard is sync.
-        # Let's use asyncio.run or context logic. Wait, grpc has an async server api.
-        # But our servicer inherits from standard (which can be async in new grpcio).
-        # We'll just run an event loop for the generator.
-        
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        async_gen = self._async_chat_stream(request, context)
-        
-        try:
-            while True:
-                chunk = loop.run_until_complete(async_gen.__anext__())
-                yield chunk
-        except StopAsyncIteration:
-            pass
-        finally:
-            loop.run_until_complete(async_gen.aclose())
-            loop.close()
+    async def ChatStream(self, request, context):
+        async for chunk in self._async_chat_stream(request, context):
+            yield chunk
 
     async def _async_list_models(self, request):
         req = ListModelsRequest.ListModelsRequest.GetRootAs(request, 0)
@@ -108,19 +96,28 @@ class SaoServicer(SaoServiceServicer):
 
         error = ""
         try:
-            models = self.router.list_available_models(provider)
-            cached_models = await self.db.get_provider_models(provider)
-            if models or not cached_models:
+            discovery = await asyncio.to_thread(self.router.list_available_models, provider)
+            if discovery.is_live:
+                models = discovery.models
                 await self.db.save_provider_models(provider, models)
             else:
-                models = cached_models
+                cached_models = await self.db.get_provider_models(provider)
+                models = cached_models or self.router.get_static_models(provider)
         except Exception as exc:
             try:
-                models = await self.db.get_provider_models(provider)
+                cached_models = await self.db.get_provider_models(provider)
             except Exception as cache_exc:
                 models = []
                 error = f"{exc}; cache lookup failed: {cache_exc}"
             else:
+                if cached_models:
+                    models = cached_models
+                else:
+                    try:
+                        models = self.router.get_static_models(provider)
+                    except Exception:
+                        models = []
+                        error = str(exc)
                 if not models:
                     error = str(exc)
 
@@ -145,28 +142,72 @@ class SaoServicer(SaoServiceServicer):
         builder.Finish(res)
         return bytes(builder.Output())
 
-    def ListModels(self, request, context):
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(self._async_list_models(request))
-        finally:
-            loop.close()
+    async def ListModels(self, request, context):
+        return await self._async_list_models(request)
 
 
-async def serve_async():
+async def serve_async(shutdown_requested=None):
     server = grpc.aio.server()
     db = Database()
     await db.init_db()
-    
-    add_SaoServiceServicer_to_server(SaoServicer(db, Router(), MCPManager()), server)
-    server.add_insecure_port('[::]:50051')
-    await server.start()
-    print("Backend AI Core started on port 50051")
-    await server.wait_for_termination()
+    mcp = MCPManager()
+    started = False
+    shutdown_event = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    registered_signals = []
+    for shutdown_signal in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(shutdown_signal, shutdown_event.set)
+            registered_signals.append(shutdown_signal)
+        except NotImplementedError:
+            pass
 
-def serve():
-    asyncio.run(serve_async())
+    async def wait_for_shutdown():
+        if shutdown_requested is None:
+            await shutdown_event.wait()
+            return
+        while not shutdown_requested.is_set():
+            await asyncio.sleep(0.1)
+
+    try:
+        startup_task = asyncio.create_task(mcp.connect_servers())
+        shutdown_task = asyncio.create_task(wait_for_shutdown())
+        done, _ = await asyncio.wait(
+            {startup_task, shutdown_task},
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if shutdown_task in done:
+            startup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await startup_task
+            return
+
+        await startup_task
+        shutdown_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await shutdown_task
+    except (ValueError, OSError, asyncio.TimeoutError) as exc:
+        shutdown_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await shutdown_task
+        print(f"MCP initialization failed; continuing without MCP tools: {exc}")
+
+    try:
+        add_SaoServiceServicer_to_server(SaoServicer(db, Router(), mcp), server)
+        server.add_insecure_port('[::]:50051')
+        await server.start()
+        started = True
+        print("Backend AI Core started on port 50051")
+        await wait_for_shutdown()
+    finally:
+        if started:
+            await server.stop(grace=5)
+        await mcp.close()
+        for shutdown_signal in registered_signals:
+            loop.remove_signal_handler(shutdown_signal)
+
+def serve(shutdown_requested=None):
+    asyncio.run(serve_async(shutdown_requested))
 
 if __name__ == '__main__':
     serve()
