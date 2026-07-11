@@ -34,3 +34,7 @@
 - Prefer small, focused changes within the owning layer.
 - Avoid crossing frontend/backend boundaries unless the request explicitly requires it.
 - If you change chat streaming or IPC, validate the end-to-end path from [sao/frontend/client.py](sao/frontend/client.py) to [sao/backend/server.py](sao/backend/server.py).
+# Permission and Authorization Handling
+- **Report Permission Denials**: If a command, tool, or service fails with a "Permission denied" or authorization error (e.g., missing GitHub CLI permissions), do not silently fall back to a workaround.
+- **Prompt the User for Fixes**: Pause execution, report the exact error message and the required permissions to the user. Allow the user to fix the configuration or authorize the action.
+- **Use Workarounds Only as a Last Resort**: Only employ alternative methods or workarounds if the user explicitly declines to fix the permissions or instructs you to find another way.
