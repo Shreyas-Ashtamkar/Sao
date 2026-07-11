@@ -109,7 +109,11 @@ class SaoServicer(SaoServiceServicer):
         error = ""
         try:
             models = self.router.list_available_models(provider)
-            await self.db.save_provider_models(provider, models)
+            cached_models = await self.db.get_provider_models(provider)
+            if models or not cached_models:
+                await self.db.save_provider_models(provider, models)
+            else:
+                models = cached_models
         except Exception as exc:
             try:
                 models = await self.db.get_provider_models(provider)

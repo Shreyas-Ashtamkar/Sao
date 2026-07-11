@@ -18,8 +18,8 @@ class WorkerSignals(QObject):
     finished = pyqtSignal()
 
 class ModelFetcherThread(QThread):
-    models_fetched = pyqtSignal(list)
-    error = pyqtSignal(str)
+    models_fetched = pyqtSignal(str, list)
+    error = pyqtSignal(str, str, bool)
 
     def __init__(self, provider, is_startup=False):
         super().__init__()
@@ -29,9 +29,9 @@ class ModelFetcherThread(QThread):
     def run(self):
         try:
             models = SaoClient().list_models(self.provider)
-            self.models_fetched.emit(models)
+            self.models_fetched.emit(self.provider, models)
         except Exception as e:
-            self.error.emit(f"Error: {str(e)}")
+            self.error.emit(self.provider, f"Error: {str(e)}", self.is_startup)
 
 
 class SettingsDialog(QDialog):
@@ -130,17 +130,22 @@ class SaoApp(QMainWindow):
         self.fetcher_thread.error.connect(self.on_fetch_error)
         self.fetcher_thread.start()
 
-    @pyqtSlot(list)
-    def on_models_fetched(self, models):
-        provider = self.settings.value("provider", "OpenAI")
+    @pyqtSlot(str, list)
+    def on_models_fetched(self, provider, models):
+        if provider != self.settings.value("provider", "OpenAI"):
+            return
+
         self.settings.setValue(f"{provider}_dynamic_models", json.dumps(models))
         self.update_model_list()
         if not models:
             QMessageBox.warning(self, "No Models", f"No models are currently available for {provider}.")
             
-    @pyqtSlot(str)
-    def on_fetch_error(self, err):
-        if self.fetcher_thread and self.fetcher_thread.is_startup:
+    @pyqtSlot(str, str, bool)
+    def on_fetch_error(self, provider, err, is_startup):
+        if provider != self.settings.value("provider", "OpenAI"):
+            return
+
+        if is_startup:
             msg = QMessageBox(self)
             msg.setIcon(QMessageBox.Icon.Critical)
             msg.setWindowTitle("Startup Error")
