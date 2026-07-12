@@ -49,11 +49,11 @@ class Router:
     def __init__(self):
         self.system_prompt = "You are Sao, a lightweight AI chat assistant for solo developers. Provide clear, concise answers without fluff."
 
-    def list_available_models(self, provider):
+    def list_available_models(self, provider, api_base="", api_key=""):
         fetchers = {
-            "OpenAI": self._fetch_openai_models,
-            "Anthropic": self._fetch_anthropic_models,
-            "Google": self._fetch_google_models,
+            "OpenAI": lambda: self._fetch_openai_models(api_base, api_key),
+            "Anthropic": lambda: self._fetch_anthropic_models(api_base, api_key),
+            "Google": lambda: self._fetch_google_models(api_base, api_key),
             "GitHub": self._fetch_github_copilot_models,
         }
         try:
@@ -65,21 +65,45 @@ class Router:
 
         return ModelDiscoveryResult(models, is_live=bool(models))
 
-    def _fetch_openai_models(self):
+    def _fetch_openai_models(self, api_base="", api_key=""):
+        if api_base:
+            api_base = api_base.strip()
+            if not api_base.startswith("http://") and not api_base.startswith("https://"):
+                api_base = "http://" + api_base
+            base_url = api_base.rstrip("/")
+            headers = {}
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            
+            with httpx.Client(timeout=10) as client:
+                try:
+                    response = client.get(f"{base_url}/models", headers=headers)
+                    if response.status_code == 404 and not base_url.endswith("/v1"):
+                        response = client.get(f"{base_url}/v1/models", headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                    models = [m.get("id") for m in data.get("data", []) if m.get("id")]
+                    if models:
+                        return sorted(set(models))
+                except Exception:
+                    pass
+            # If fetching fails but api_base is provided, maybe the user wants to type it manually?
+            # We'll just fall back to standard models, but disable filtering if base is set.
+
         models = litellm.get_valid_models(
             check_provider_endpoint=True,
             custom_llm_provider="openai",
         )
-        return self._filter_openai_models(models)
+        return self._filter_openai_models(models, allow_all=bool(api_base))
 
-    def _fetch_anthropic_models(self):
+    def _fetch_anthropic_models(self, api_base="", api_key=""):
         models = litellm.get_valid_models(
             check_provider_endpoint=True,
             custom_llm_provider="anthropic",
         )
         return sorted(set(m for m in models if isinstance(m, str)))
 
-    def _fetch_google_models(self):
+    def _fetch_google_models(self, api_base="", api_key=""):
         models = litellm.get_valid_models(
             check_provider_endpoint=True,
             custom_llm_provider="gemini",
@@ -131,7 +155,11 @@ class Router:
             result = [model for model in result if model.startswith("gemini-")]
         return sorted(set(result))
 
-    def _filter_openai_models(self, models):
+    def _filter_openai_models(self, models, allow_all=False):
+        if allow_all:
+            result = [m for m in models if isinstance(m, str)]
+            return sorted(set(result))
+            
         result = []
         for model in models:
             if not isinstance(model, str) or "/" in model:
@@ -180,7 +208,7 @@ class Router:
 
         return sorted(set(normalized))
 
-    async def generate_response_stream(self, model_id, messages, tools=None, provider=None, tool_executor=None):
+    async def generate_response_stream(self, model_id, messages, tools=None, provider=None, api_base="", api_key="", tool_executor=None):
         try:
             # Prepend system prompt if not present
             if not messages or messages[0].get("role") != "system":
@@ -193,6 +221,30 @@ class Router:
                 "messages": messages,
                 "stream": True,
             }
+            if provider in ("OpenAI", "Anthropic", "Google"):
+                if provider == "OpenAI":
+                    kwargs["custom_llm_provider"] = "openai"
+                    if api_base:
+                        api_base = api_base.strip()
+                        if not api_base.startswith("http://") and not api_base.startswith("https://"):
+                            api_base = "http://" + api_base
+                        if not api_base.rstrip("/").endswith("/v1"):
+                            api_base = api_base.rstrip("/") + "/v1"
+                elif provider == "Anthropic":
+                    kwargs["custom_llm_provider"] = "anthropic"
+                elif provider == "Google":
+                    kwargs["custom_llm_provider"] = "gemini"
+                    
+                if api_base:
+                    api_base = api_base.strip()
+                    if not api_base.startswith("http://") and not api_base.startswith("https://"):
+                        api_base = "http://" + api_base
+                    kwargs["api_base"] = api_base
+                if api_key:
+                    kwargs["api_key"] = api_key
+                elif api_base:
+                    kwargs["api_key"] = "dummy"
+            
             if tools:
                 kwargs["tools"] = tools
 
@@ -259,7 +311,12 @@ class Router:
                         }
                     )
         except Exception as e:
-            yield {"error": str(e)}
+            error_msg = str(e)
+            if "OpenAIException - Connection error" in error_msg:
+                error_msg = "Connection error: Could not connect to the API base URL. Ensure the URL is correct and the server is running."
+            elif "Github_copilotException" in error_msg and "is not accessible" in error_msg:
+                error_msg = f"Model '{model_id}' is not accessible with your GitHub Copilot subscription."
+            yield {"error": error_msg}
 
     @staticmethod
     def _get_chunk_content(chunk):

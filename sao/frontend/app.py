@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, QObject, pyqtSlot, QSettings, QThread
 from .client import SaoClient
+from sao.config import load_last_state, save_last_state, get_env_credentials, set_env_credentials, DEFAULT_BASES
 
 PROVIDERS = ["OpenAI", "Anthropic", "GitHub", "Google"]
 
@@ -21,15 +22,17 @@ class ModelFetcherThread(QThread):
     models_fetched = pyqtSignal(str, list, int)
     error = pyqtSignal(str, str, bool, int)
 
-    def __init__(self, provider, request_id, is_startup=False):
+    def __init__(self, provider, request_id, is_startup=False, api_base="", api_key=""):
         super().__init__()
         self.provider = provider
         self.request_id = request_id
         self.is_startup = is_startup
+        self.api_base = api_base
+        self.api_key = api_key
 
     def run(self):
         try:
-            models = SaoClient().list_models(self.provider)
+            models = SaoClient().list_models(self.provider, self.api_base, self.api_key)
             self.models_fetched.emit(self.provider, models, self.request_id)
         except Exception as e:
             self.error.emit(self.provider, f"Error: {str(e)}", self.is_startup, self.request_id)
@@ -49,22 +52,103 @@ class SettingsDialog(QDialog):
         self.provider_combo = QComboBox()
         self.provider_combo.addItems(PROVIDERS)
         
-        current_provider = self.settings.value("provider", "OpenAI")
+        state = load_last_state()
+        current_provider = self.settings.value("provider", state.get("active_provider", "OpenAI"))
         if current_provider in PROVIDERS:
             self.provider_combo.setCurrentText(current_provider)
             
-        form_layout.addRow(QLabel("Provider:"), self.provider_combo)
+        self.form_layout.addRow(QLabel("Provider:"), self.provider_combo)
+        
+        provider_state = state.get("providers", {}).get(current_provider, {})
+        self.config_mode_combo = QComboBox()
+        self.config_mode_combo.addItems(["Default", "Custom"])
+        self.config_mode_combo.setCurrentText(provider_state.get("config_mode", "Default"))
+        self.form_layout.addRow(QLabel("Configuration Mode:"), self.config_mode_combo)
+            
+        self.api_base_label = QLabel(f"{current_provider} API Base:")
+        self.api_base_input = QLineEdit()
+        self.api_base_input.setPlaceholderText("https://... (Optional)")
+        
+        self.api_key_label = QLabel(f"{current_provider} API Key:")
+        self.api_key_input = QLineEdit()
+        self.api_key_input.setPlaceholderText("sk-... (Optional)")
+        self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        form_layout.addRow(self.api_base_label, self.api_base_input)
+        form_layout.addRow(self.api_key_label, self.api_key_input)
             
         layout.addLayout(form_layout)
-        layout.addWidget(QLabel("Credentials are managed by your backend environment."))
+        layout.addWidget(QLabel("Other credentials are managed by your backend environment."))
         
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
         
+        self.provider_combo.currentTextChanged.connect(self.on_provider_changed)
+        self.config_mode_combo.currentTextChanged.connect(self.on_config_mode_changed)
+        self.on_provider_changed(current_provider)
+
+    def on_provider_changed(self, text):
+        state = load_last_state()
+        provider_state = state.get("providers", {}).get(text, {})
+        self.config_mode_combo.setCurrentText(provider_state.get("config_mode", "Default"))
+        
+        if text == "GitHub":
+            self.config_mode_combo.hide()
+            self.form_layout.labelForField(self.config_mode_combo).hide()
+            self.api_base_label.hide()
+            self.api_base_input.hide()
+            self.api_key_label.hide()
+            self.api_key_input.hide()
+        else:
+            self.config_mode_combo.show()
+            self.form_layout.labelForField(self.config_mode_combo).show()
+            self.api_base_label.show()
+            self.api_base_input.show()
+            self.api_key_label.show()
+            self.api_key_input.show()
+            self.on_config_mode_changed(self.config_mode_combo.currentText())
+            
+    def on_config_mode_changed(self, text):
+        provider = self.provider_combo.currentText()
+        if provider == "GitHub":
+            return
+            
+        base, key = get_env_credentials(provider)
+        
+        if text == "Default":
+            self.api_base_label.setText(f"{provider} API Base:")
+            self.api_base_input.setText(DEFAULT_BASES.get(provider, ""))
+            self.api_base_input.setDisabled(True)
+            self.api_key_label.setText(f"{provider} API Key (Mandatory):")
+        else:
+            self.api_base_label.setText(f"{provider} API Base (Mandatory):")
+            self.api_base_input.setText(base)
+            self.api_base_input.setDisabled(False)
+            self.api_key_label.setText(f"{provider} API Key (Optional):")
+            
+        self.api_key_input.setText(key)
+        
     def accept(self):
-        self.settings.setValue("provider", self.provider_combo.currentText())
+        provider = self.provider_combo.currentText()
+        config_mode = self.config_mode_combo.currentText()
+        
+        if provider != "GitHub":
+            api_base = self.api_base_input.text().strip()
+            api_key = self.api_key_input.text().strip()
+            
+            if config_mode == "Default" and not api_key:
+                QMessageBox.warning(self, "Validation Error", "API Key is mandatory for Default configuration.")
+                return
+            if config_mode == "Custom" and not api_base:
+                QMessageBox.warning(self, "Validation Error", "API Base is mandatory for Custom configuration.")
+                return
+                
+            set_env_credentials(provider, api_base, api_key)
+            
+        self.settings.setValue("provider", provider)
+        save_last_state(provider, config_mode=config_mode)
         super().accept()
 
 class SaoApp(QMainWindow):
@@ -77,6 +161,14 @@ class SaoApp(QMainWindow):
         self.session_id = str(uuid.uuid4())
         self.messages_history = []
         self.settings = QSettings("Sao", "SaoApp")
+        
+        state = load_last_state()
+        active_provider = state.get("active_provider")
+        if active_provider:
+            self.settings.setValue("provider", active_provider)
+            
+        provider_state = state.get("providers", {}).get(self.settings.value("provider", "OpenAI"), {})
+        self._last_model = provider_state.get("model", "")
         
         self.signals = WorkerSignals()
         self.signals.chunk_received.connect(self.append_chunk)
@@ -126,12 +218,22 @@ class SaoApp(QMainWindow):
         
     def refresh_models(self, is_startup=False):
         provider = self.settings.value("provider", "OpenAI")
+        state = load_last_state()
+        provider_state = state.get("providers", {}).get(provider, {})
+        config_mode = provider_state.get("config_mode", "Default")
+        
+        env_api_base, env_api_key = get_env_credentials(provider)
+        api_base = DEFAULT_BASES.get(provider, "") if config_mode == "Default" else env_api_base
+        api_key = env_api_key
+        
         self.model_fetch_request_id += 1
 
         fetcher_thread = ModelFetcherThread(
             provider,
             self.model_fetch_request_id,
             is_startup=is_startup,
+            api_base=api_base,
+            api_key=api_key
         )
         self.fetcher_threads.add(fetcher_thread)
         fetcher_thread.models_fetched.connect(self.on_models_fetched)
@@ -205,9 +307,28 @@ class SaoApp(QMainWindow):
         self.model_selector.addItems(models_sorted)
         
         # Restore previously selected model if it's still in the list
-        if current_model in models_sorted:
+        if self._last_model in models_sorted:
+            self.model_selector.setCurrentText(self._last_model)
+        elif current_model in models_sorted:
             self.model_selector.setCurrentText(current_model)
+        
+        try:
+            self.model_selector.currentTextChanged.disconnect(self.on_model_changed)
+        except TypeError:
+            pass
+        self.model_selector.currentTextChanged.connect(self.on_model_changed)
+        
         self.update_interaction_state()
+
+    @pyqtSlot(str)
+    def on_model_changed(self, text):
+        if text:
+            self._last_model = text
+            provider = self.settings.value("provider", "OpenAI")
+            state = load_last_state()
+            provider_state = state.get("providers", {}).get(provider, {})
+            config_mode = provider_state.get("config_mode", "Default")
+            save_last_state(provider, model=text, config_mode=config_mode)
 
     def update_interaction_state(self):
         has_model = self.model_selector.count() > 0 and bool(self.model_selector.currentText())
@@ -257,12 +378,20 @@ class SaoApp(QMainWindow):
         self.settings.setValue("model_usage", json.dumps(usage))
         
         # Start background thread for gRPC streaming
-        threading.Thread(target=self.stream_response, args=(model_id, provider), daemon=True).start()
+        state = load_last_state()
+        provider_state = state.get("providers", {}).get(provider, {})
+        config_mode = provider_state.get("config_mode", "Default")
         
-    def stream_response(self, model_id, provider):
+        env_api_base, env_api_key = get_env_credentials(provider)
+        api_base = DEFAULT_BASES.get(provider, "") if config_mode == "Default" else env_api_base
+        api_key = env_api_key
+        
+        threading.Thread(target=self.stream_response, args=(model_id, provider, api_base, api_key), daemon=True).start()
+        
+    def stream_response(self, model_id, provider, api_base, api_key):
         full_response = ""
         try:
-            for chunk, is_final in self.client.send_chat_stream(self.session_id, model_id, self.messages_history, provider=provider):
+            for chunk, is_final in self.client.send_chat_stream(self.session_id, model_id, self.messages_history, provider=provider, api_base=api_base, api_key=api_key):
                 if chunk:
                     full_response += chunk
                     self.signals.chunk_received.emit(chunk)
