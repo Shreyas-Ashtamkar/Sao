@@ -27,6 +27,8 @@ class SaoServicer(SaoServiceServicer):
         session_id = req.SessionId().decode('utf-8')
         model_id = req.ModelId().decode('utf-8')
         provider = req.Provider().decode('utf-8') if req.Provider() else ""
+        api_base = req.ApiBase().decode('utf-8') if req.ApiBase() else ""
+        api_key = req.ApiKey().decode('utf-8') if req.ApiKey() else ""
         
         messages = []
         for i in range(req.MessagesLength()):
@@ -45,6 +47,8 @@ class SaoServicer(SaoServiceServicer):
             messages,
             self.mcp.get_tool_schemas(),
             provider=provider,
+            api_base=api_base,
+            api_key=api_key,
             tool_executor=self.mcp.execute_tool,
         ):
             # Handle LiteLLM chunk
@@ -93,10 +97,12 @@ class SaoServicer(SaoServiceServicer):
     async def _async_list_models(self, request):
         req = ListModelsRequest.ListModelsRequest.GetRootAs(request, 0)
         provider = req.Provider().decode('utf-8') if req.Provider() else ""
+        api_base = req.ApiBase().decode('utf-8') if req.ApiBase() else ""
+        api_key = req.ApiKey().decode('utf-8') if req.ApiKey() else ""
 
         error = ""
         try:
-            discovery = await asyncio.to_thread(self.router.list_available_models, provider)
+            discovery = await asyncio.to_thread(self.router.list_available_models, provider, api_base, api_key)
             if discovery.is_live:
                 models = discovery.models
                 await self.db.save_provider_models(provider, models)

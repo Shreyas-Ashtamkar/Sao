@@ -1,0 +1,1 @@
+{"active_provider": "GitHub", "providers": {"GitHub": {"model": "gpt-4o-mini", "config_mode": "Default"}, "OpenAI": {"model": "granite4.1:3B", "config_mode": "Custom"}}}

@@ -12,7 +12,14 @@ class SaoClient:
         self.channel = grpc.insecure_channel(f'{host}:{port}')
         self.stub = SaoServiceStub(self.channel)
 
-    def send_chat_stream(self, session_id, model_id, messages_history, provider=""):
+    def _wait_for_ready(self, timeout=10):
+        try:
+            grpc.channel_ready_future(self.channel).result(timeout=timeout)
+        except grpc.FutureTimeoutError:
+            raise RuntimeError("Could not connect to backend server. It may still be starting up.")
+
+    def send_chat_stream(self, session_id, model_id, messages_history, provider="", api_base="", api_key=""):
+        self._wait_for_ready()
         builder = flatbuffers.Builder(1024)
         
         # Serialize messages
@@ -36,12 +43,16 @@ class SaoClient:
         session_id_off = builder.CreateString(session_id)
         model_id_off = builder.CreateString(model_id)
         provider_off = builder.CreateString(provider)
+        api_base_off = builder.CreateString(api_base)
+        api_key_off = builder.CreateString(api_key)
         
         ChatRequest.Start(builder)
         ChatRequest.AddSessionId(builder, session_id_off)
         ChatRequest.AddModelId(builder, model_id_off)
         ChatRequest.AddMessages(builder, msgs_vec)
         ChatRequest.AddProvider(builder, provider_off)
+        ChatRequest.AddApiBase(builder, api_base_off)
+        ChatRequest.AddApiKey(builder, api_key_off)
         
         req = ChatRequest.End(builder)
         builder.Finish(req)
@@ -57,12 +68,17 @@ class SaoClient:
             is_final = res.IsFinal()
             yield chunk, is_final
 
-    def list_models(self, provider):
+    def list_models(self, provider, api_base="", api_key=""):
+        self._wait_for_ready()
         builder = flatbuffers.Builder(256)
         provider_off = builder.CreateString(provider)
+        api_base_off = builder.CreateString(api_base)
+        api_key_off = builder.CreateString(api_key)
 
         ListModelsRequest.Start(builder)
         ListModelsRequest.AddProvider(builder, provider_off)
+        ListModelsRequest.AddApiBase(builder, api_base_off)
+        ListModelsRequest.AddApiKey(builder, api_key_off)
         req = ListModelsRequest.End(builder)
         builder.Finish(req)
 

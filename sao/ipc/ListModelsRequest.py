@@ -20,18 +20,33 @@ class ListModelsRequest(object):
     def GetRootAsListModelsRequest(cls, buf, offset=0):
         """This method is deprecated. Please switch to GetRootAs."""
         return cls.GetRootAs(buf, offset)
-
+    # ListModelsRequest
     def Init(self, buf, pos):
         self._tab = flatbuffers.table.Table(buf, pos)
 
+    # ListModelsRequest
     def Provider(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
             return self._tab.String(o + self._tab.Pos)
         return None
 
+    # ListModelsRequest
+    def ApiBase(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+    # ListModelsRequest
+    def ApiKey(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
 def ListModelsRequestStart(builder):
-    builder.StartObject(1)
+    builder.StartObject(3)
 
 def Start(builder):
     ListModelsRequestStart(builder)
@@ -41,6 +56,18 @@ def ListModelsRequestAddProvider(builder, provider):
 
 def AddProvider(builder, provider):
     ListModelsRequestAddProvider(builder, provider)
+
+def ListModelsRequestAddApiBase(builder, apiBase):
+    builder.PrependUOffsetTRelativeSlot(1, flatbuffers.number_types.UOffsetTFlags.py_type(apiBase), 0)
+
+def AddApiBase(builder, apiBase):
+    ListModelsRequestAddApiBase(builder, apiBase)
+
+def ListModelsRequestAddApiKey(builder, apiKey):
+    builder.PrependUOffsetTRelativeSlot(2, flatbuffers.number_types.UOffsetTFlags.py_type(apiKey), 0)
+
+def AddApiKey(builder, apiKey):
+    ListModelsRequestAddApiKey(builder, apiKey)
 
 def ListModelsRequestEnd(builder):
     return builder.EndObject()

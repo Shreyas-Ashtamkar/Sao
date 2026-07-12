@@ -4,3 +4,5 @@ flatbuffers==25.12.19
 litellm==1.83.7
 mcp==1.28.1
 aiosqlite==0.22.1
+streamlit>=1.35.0
+python-dotenv>=1.0.1

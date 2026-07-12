@@ -70,8 +70,22 @@ class ChatRequest(object):
             return self._tab.String(o + self._tab.Pos)
         return None
 
+    # ChatRequest
+    def ApiBase(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
+    # ChatRequest
+    def ApiKey(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
+        if o != 0:
+            return self._tab.String(o + self._tab.Pos)
+        return None
+
 def ChatRequestStart(builder):
-    builder.StartObject(4)
+    builder.StartObject(6)
 
 def Start(builder):
     ChatRequestStart(builder)
@@ -111,6 +125,18 @@ def ChatRequestAddProvider(builder, provider):
 
 def AddProvider(builder, provider):
     ChatRequestAddProvider(builder, provider)
+
+def ChatRequestAddApiBase(builder, apiBase):
+    builder.PrependUOffsetTRelativeSlot(4, flatbuffers.number_types.UOffsetTFlags.py_type(apiBase), 0)
+
+def AddApiBase(builder, apiBase):
+    ChatRequestAddApiBase(builder, apiBase)
+
+def ChatRequestAddApiKey(builder, apiKey):
+    builder.PrependUOffsetTRelativeSlot(5, flatbuffers.number_types.UOffsetTFlags.py_type(apiKey), 0)
+
+def AddApiKey(builder, apiKey):
+    ChatRequestAddApiKey(builder, apiKey)
 
 def ChatRequestEnd(builder):
     return builder.EndObject()
